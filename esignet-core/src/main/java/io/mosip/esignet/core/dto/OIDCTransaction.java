@@ -16,7 +16,7 @@ import java.util.Set;
 
 @Data
 public class OIDCTransaction implements Serializable {
-    private static final long serialVersionUID = 2283752863051489132L;
+    private static final long serialVersionUID = 1L;
 
     String transactionId;
 
