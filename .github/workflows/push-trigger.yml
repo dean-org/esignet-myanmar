@@ -14,13 +14,7 @@ on:
         type: string
   push:
     branches:
-      - '!release-branch'
-      - master
-      - 1.*
-      - develop
-      - MOSIP*
-      - release*
-      - ES-496
+      - myanmar
 
 jobs:
   build-maven-esignet:
