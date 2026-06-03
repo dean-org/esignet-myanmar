@@ -191,6 +191,9 @@ public class ClientManagementServiceImpl implements ClientManagementService {
                 dto.setClaims(objectMapper.readValue(result.get().getClaims(), typeReference));
             dto.setAcrValues(objectMapper.readValue(result.get().getAcrValues(), typeReference));
             dto.setRedirectUris(objectMapper.readValue(result.get().getRedirectUris(), typeReference));
+            log.info("Parsed redirect URIs for clientId={} : {}",
+                clientId,
+                dto.getRedirectUris());
             dto.setGrantTypes(objectMapper.readValue(result.get().getGrantTypes(), typeReference));
             dto.setClientAuthMethods(objectMapper.readValue(result.get().getClientAuthMethods(), typeReference));
         } catch (Exception e) {
