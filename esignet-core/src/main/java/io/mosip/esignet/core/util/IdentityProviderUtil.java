@@ -170,6 +170,8 @@ public class IdentityProviderUtil {
     }
 
     public static void validateRedirectURI(List<String> registeredRedirectUris, String requestedRedirectUri) throws EsignetException {
+		 log.info("Registered redirect URIs: {}", registeredRedirectUris);
+        log.info("Requested redirect URI: {}", requestedRedirectUri);
         if(registeredRedirectUris.stream().anyMatch(uri -> matchUri(uri, requestedRedirectUri)))
             return;
 
