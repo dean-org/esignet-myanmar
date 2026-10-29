@@ -13,18 +13,23 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.mosip.esignet.api.dto.AuthChallenge;
 import io.mosip.esignet.api.dto.KeyBindingResult;
 import io.mosip.esignet.api.dto.SendOtpResult;
 import io.mosip.esignet.api.exception.KeyBindingException;
 import io.mosip.esignet.api.exception.SendOtpException;
 import io.mosip.esignet.api.spi.KeyBinder;
-import io.mosip.esignet.core.dto.*;
+import io.mosip.esignet.core.dto.BindingOtpRequest;
+import io.mosip.esignet.core.dto.BindingOtpResponse;
+import io.mosip.esignet.core.dto.WalletBindingRequest;
+import io.mosip.esignet.core.dto.WalletBindingResponse;
 import io.mosip.esignet.core.exception.EsignetException;
 import io.mosip.esignet.core.spi.KeyBindingService;
 import io.mosip.esignet.entity.PublicKeyRegistry;
 import io.mosip.esignet.repository.PublicKeyRegistryRepository;
-import io.mosip.esignet.services.KeyBindingHelperService;
 import io.mosip.kernel.keymanagerservice.util.KeymanagerUtil;
 
 import org.jose4j.jwe.ContentEncryptionAlgorithmIdentifiers;
@@ -38,7 +43,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import io.mosip.esignet.core.util.IdentityProviderUtil;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -58,6 +62,9 @@ public class KeyBindingServiceImpl implements KeyBindingService {
     @Autowired
     private KeyBindingHelperService keyBindingHelperService;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @Value("${mosip.esignet.binding.encrypt-binding-id:true}")
     private boolean encryptBindingId;
 
@@ -75,19 +82,19 @@ public class KeyBindingServiceImpl implements KeyBindingService {
                     bindingOtpRequest.getOtpChannels(),
                     requestHeaders);
         } catch (SendOtpException e) {
-            log.error("Failed to send binding otp: {}", e);
+            log.error("Failed to send binding OTP", e);
             throw new EsignetException(e.getErrorCode());
         }
 
         if (sendOtpResult == null) {
-            log.error("send-otp Failed wrapper returned null result!");
+            log.error("send-otp failed: wrapper returned null result");
             throw new EsignetException(SEND_OTP_FAILED);
         }
 
-        BindingOtpResponse otpResponse = new BindingOtpResponse();
-        otpResponse.setMaskedEmail(sendOtpResult.getMaskedEmail());
-        otpResponse.setMaskedMobile(sendOtpResult.getMaskedMobile());
-        return otpResponse;
+        BindingOtpResponse response = new BindingOtpResponse();
+        response.setMaskedEmail(sendOtpResult.getMaskedEmail());
+        response.setMaskedMobile(sendOtpResult.getMaskedMobile());
+        return response;
     }
 
     private void validateChallengeListAuthFormat(
@@ -97,9 +104,9 @@ public class KeyBindingServiceImpl implements KeyBindingService {
                 keyBindingWrapper
                         .getSupportedChallengeFormats(challenge.getAuthFactorType())
                         .contains(challenge.getFormat()))) {
-
-            log.error("Invalid auth factor type or challenge format in the challenge list");
-            throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
+            log.error("Invalid auth factor type or challenge format");
+            throw new EsignetException(
+                    INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
         }
     }
 
@@ -110,15 +117,19 @@ public class KeyBindingServiceImpl implements KeyBindingService {
 
         log.debug("bindWallet :: Request headers >> {}", requestHeaders);
 
-        validateChallengeListAuthFormat(walletBindingRequest.getChallengeList());
+        validateChallengeListAuthFormat(
+                walletBindingRequest.getChallengeList());
 
         if (!keyBindingWrapper
-                .getSupportedChallengeFormats(walletBindingRequest.getAuthFactorType())
+                .getSupportedChallengeFormats(
+                        walletBindingRequest.getAuthFactorType())
                 .contains(walletBindingRequest.getFormat())) {
-            throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
+            throw new EsignetException(
+                    INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
         }
 
-        Map<String, Object> publicKey = walletBindingRequest.getPublicKey();
+        Map<String, Object> publicKey =
+                walletBindingRequest.getPublicKey();
 
         KeyBindingResult keyBindingResult;
         try {
@@ -136,7 +147,20 @@ public class KeyBindingServiceImpl implements KeyBindingService {
         if (keyBindingResult == null
                 || keyBindingResult.getCertificate() == null
                 || keyBindingResult.getPartnerSpecificUserToken() == null) {
-            log.error("wallet binding failed with result : {}", keyBindingResult);
+            log.error("Wallet binding failed: {}", keyBindingResult);
+            throw new EsignetException(KEY_BINDING_FAILED);
+        }
+
+        /*
+         * Serialize the public key for registry storage if the helper's
+         * method accepts a String. If it accepts Map<String, Object>,
+         * pass publicKey directly instead.
+         */
+        String publicKeyJson;
+        try {
+            publicKeyJson = objectMapper.writeValueAsString(publicKey);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize public key", e);
             throw new EsignetException(KEY_BINDING_FAILED);
         }
 
@@ -144,14 +168,18 @@ public class KeyBindingServiceImpl implements KeyBindingService {
                 keyBindingHelperService.storeKeyBindingDetailsInRegistry(
                         walletBindingRequest.getIndividualId(),
                         keyBindingResult.getPartnerSpecificUserToken(),
-                        publicKey,
+                        publicKeyJson,
                         keyBindingResult.getCertificate(),
                         walletBindingRequest.getAuthFactorType());
 
+        String bindingId = publicKeyRegistry.getWalletBindingId();
+
+        if (encryptBindingId) {
+            bindingId = getJWE(publicKey, bindingId);
+        }
+
         return new WalletBindingResponse(
-                encryptBindingId
-                        ? getJWE(publicKey, publicKeyRegistry.getWalletBindingId())
-                        : publicKeyRegistry.getWalletBindingId(),
+                bindingId,
                 keyBindingResult.getCertificate(),
                 publicKeyRegistry.getExpiredtimes().format(
                         DateTimeFormatter.ofPattern(UTC_DATETIME_PATTERN)));
@@ -162,19 +190,19 @@ public class KeyBindingServiceImpl implements KeyBindingService {
             String walletBindingId) {
 
         try {
-            JsonWebEncryption jsonWebEncryption = new JsonWebEncryption();
-            jsonWebEncryption.setAlgorithmHeaderValue(
-                    KeyManagementAlgorithmIdentifiers.RSA_OAEP_256);
-            jsonWebEncryption.setEncryptionMethodHeaderParameter(
-                    ContentEncryptionAlgorithmIdentifiers.AES_256_GCM);
-            jsonWebEncryption.setPayload(walletBindingId);
-            jsonWebEncryption.setContentTypeHeaderValue("JWT");
-
             RsaJsonWebKey jsonWebKey = new RsaJsonWebKey(publicKey);
-            jsonWebEncryption.setKey(jsonWebKey.getKey());
-            jsonWebEncryption.setKeyIdHeaderValue(jsonWebKey.getKeyId());
 
-            return jsonWebEncryption.getCompactSerialization();
+            JsonWebEncryption jwe = new JsonWebEncryption();
+            jwe.setAlgorithmHeaderValue(
+                    KeyManagementAlgorithmIdentifiers.RSA_OAEP_256);
+            jwe.setEncryptionMethodHeaderParameter(
+                    ContentEncryptionAlgorithmIdentifiers.AES_256_GCM);
+            jwe.setPayload(walletBindingId);
+            jwe.setContentTypeHeaderValue("JWT");
+            jwe.setKey(jsonWebKey.getKey());
+            jwe.setKeyIdHeaderValue(jsonWebKey.getKeyId());
+
+            return jwe.getCompactSerialization();
 
         } catch (JoseException e) {
             log.error("Failed to create JWE", e);
