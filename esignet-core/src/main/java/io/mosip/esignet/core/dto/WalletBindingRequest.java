@@ -20,6 +20,7 @@ import io.mosip.esignet.core.constants.ErrorConstants;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.util.Map;
 
 @Data
 @AllArgsConstructor
@@ -34,7 +35,8 @@ public class WalletBindingRequest {
 	private List<@Valid AuthChallenge> challengeList;
     
     @NotEmpty(message = ErrorConstants.INVALID_PUBLIC_KEY)
-    private Map<String, Object> publicKey;
+    private String publicKey;
+	#private Map<String, Object> publicKey;
 
 	@NotEmpty(message = ErrorConstants.INVALID_AUTH_FACTOR_TYPE)
 	private String authFactorType; //bind a key to a single auth-factor-type
