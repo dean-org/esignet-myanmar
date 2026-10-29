@@ -10,7 +10,8 @@ import static io.mosip.esignet.core.constants.Constants.UTC_DATETIME_PATTERN;
 import static io.mosip.esignet.core.constants.ErrorConstants.*;
 
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 import io.mosip.esignet.api.dto.AuthChallenge;
 import io.mosip.esignet.api.dto.KeyBindingResult;
@@ -20,8 +21,10 @@ import io.mosip.esignet.api.exception.SendOtpException;
 import io.mosip.esignet.api.spi.KeyBinder;
 import io.mosip.esignet.core.dto.*;
 import io.mosip.esignet.core.exception.EsignetException;
+import io.mosip.esignet.core.spi.KeyBindingService;
+import io.mosip.esignet.core.util.IdentityProviderUtil;
+import io.mosip.esignet.entity.PublicKeyRegistry;
 import io.mosip.esignet.repository.PublicKeyRegistryRepository;
-import io.mosip.kernel.keymanagerservice.util.KeymanagerUtil;
 import org.jose4j.jwe.ContentEncryptionAlgorithmIdentifiers;
 import org.jose4j.jwe.JsonWebEncryption;
 import org.jose4j.jwe.KeyManagementAlgorithmIdentifiers;
@@ -32,9 +35,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import io.mosip.esignet.entity.PublicKeyRegistry;
-import io.mosip.esignet.core.spi.KeyBindingService;
-import io.mosip.esignet.core.util.IdentityProviderUtil;
+import io.mosip.kernel.keymanagerservice.util.KeymanagerUtil;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -42,122 +43,140 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 public class KeyBindingServiceImpl implements KeyBindingService {
 
-	@Autowired
-	private KeyBinder keyBindingWrapper;
+    @Autowired
+    private KeyBinder keyBindingWrapper;
 
-	@Autowired
-	private PublicKeyRegistryRepository publicKeyRegistryRepository;
+    @Autowired
+    private PublicKeyRegistryRepository publicKeyRegistryRepository;
 
-	@Autowired
-	private KeymanagerUtil keymanagerUtil;
+    @Autowired
+    private KeymanagerUtil keymanagerUtil;
 
-	@Autowired
-	private KeyBindingHelperService keyBindingHelperService;
+    @Autowired
+    private KeyBindingHelperService keyBindingHelperService;
 
-	@Value("${mosip.esignet.binding.encrypt-binding-id:true}")
-	private boolean encryptBindingId;
+    @Value("${mosip.esignet.binding.encrypt-binding-id:true}")
+    private boolean encryptBindingId;
 
+    @Override
+    public BindingOtpResponse sendBindingOtp(
+            BindingOtpRequest bindingOtpRequest,
+            Map<String, String> requestHeaders) throws EsignetException {
 
-	@Override
-	public BindingOtpResponse sendBindingOtp(BindingOtpRequest bindingOtpRequest, Map<String, String> requestHeaders) throws EsignetException {
-		log.debug("sendBindingOtp :: Request headers >> {}", requestHeaders);
-		SendOtpResult sendOtpResult;
-		try {
-			sendOtpResult = keyBindingWrapper.sendBindingOtp(bindingOtpRequest.getIndividualId(),
-					bindingOtpRequest.getOtpChannels(), requestHeaders);
-		} catch (SendOtpException e) {
-			log.error("Failed to send binding otp: {}", e);
-			throw new EsignetException(e.getErrorCode());
-		}
+        log.debug("sendBindingOtp :: Request headers >> {}", requestHeaders);
 
-		if (sendOtpResult == null) {
-			log.error("send-otp Failed wrapper returned null result!");
-			throw new EsignetException(SEND_OTP_FAILED);
-		}
+        SendOtpResult sendOtpResult;
+        try {
+            sendOtpResult = keyBindingWrapper.sendBindingOtp(
+                    bindingOtpRequest.getIndividualId(),
+                    bindingOtpRequest.getOtpChannels(),
+                    requestHeaders);
+        } catch (SendOtpException e) {
+            log.error("Failed to send binding otp: {}", e);
+            throw new EsignetException(e.getErrorCode());
+        }
 
-		BindingOtpResponse otpResponse = new BindingOtpResponse();
-		otpResponse.setMaskedEmail(sendOtpResult.getMaskedEmail());
-		otpResponse.setMaskedMobile(sendOtpResult.getMaskedMobile());
-		return otpResponse;
-	}
+        if (sendOtpResult == null) {
+            log.error("send-otp Failed wrapper returned null result!");
+            throw new EsignetException(SEND_OTP_FAILED);
+        }
 
-	private void validateChallengeListAuthFormat(List<AuthChallenge> challengeList){
-		if(!challengeList.stream().allMatch(challenge->keyBindingWrapper.getSupportedChallengeFormats(challenge.getAuthFactorType()).
-				contains(challenge.getFormat()))) {
-			log.error("Invalid auth factor type or challenge format in the challenge list");
-			throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
-		}
-	}
+        BindingOtpResponse otpResponse = new BindingOtpResponse();
+        otpResponse.setMaskedEmail(sendOtpResult.getMaskedEmail());
+        otpResponse.setMaskedMobile(sendOtpResult.getMaskedMobile());
+        return otpResponse;
+    }
 
-	@Override
-	public WalletBindingResponse bindWallet(
-	        WalletBindingRequest walletBindingRequest,
-	        Map<String, String> requestHeaders) throws EsignetException {
-	
-	    log.debug("bindWallet :: Request headers >> {}", requestHeaders);
-	    validateChallengeListAuthFormat(walletBindingRequest.getChallengeList());
-	
-	    if (!keyBindingWrapper.getSupportedChallengeFormats(
-	            walletBindingRequest.getAuthFactorType())
-	            .contains(walletBindingRequest.getFormat())) {
-	        throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
-	    }
-	
-	    String publicKey = IdentityProviderUtil.getJWKString(
-	            walletBindingRequest.getPublicKey());
-	
-	    KeyBindingResult keyBindingResult;
-	    try {
-	        keyBindingResult = keyBindingWrapper.doKeyBinding(
-	                walletBindingRequest.getIndividualId(),
-	                walletBindingRequest.getChallengeList(),
-	                walletBindingRequest.getPublicKey(),
-	                walletBindingRequest.getAuthFactorType(),
-	                requestHeaders);
-	    } catch (KeyBindingException e) {
-	        log.error("Failed to bind the key", e);
-	        throw new EsignetException(e.getErrorCode());
-	    }
-	
-	    if (keyBindingResult == null
-	            || keyBindingResult.getCertificate() == null
-	            || keyBindingResult.getPartnerSpecificUserToken() == null) {
-	        log.error("wallet binding failed with result : {}", keyBindingResult);
-	        throw new EsignetException(KEY_BINDING_FAILED);
-	    }
-	
-	    PublicKeyRegistry publicKeyRegistry =
-	            keyBindingHelperService.storeKeyBindingDetailsInRegistry(
-	                    walletBindingRequest.getIndividualId(),
-	                    keyBindingResult.getPartnerSpecificUserToken(),
-	                    publicKey,
-	                    keyBindingResult.getCertificate(),
-	                    walletBindingRequest.getAuthFactorType());
-	
-	    return new WalletBindingResponse(
-	            encryptBindingId
-	                    ? getJWE(walletBindingRequest.getPublicKey(),
-	                            publicKeyRegistry.getWalletBindingId())
-	                    : publicKeyRegistry.getWalletBindingId(),
-	            keyBindingResult.getCertificate(),
-	            publicKeyRegistry.getExpiredtimes().format(
-	                    DateTimeFormatter.ofPattern(UTC_DATETIME_PATTERN)));
-	}
+    private void validateChallengeListAuthFormat(
+            List<AuthChallenge> challengeList) {
 
-	private String getJWE(Map<String, Object> publicKey, String walletBindingId) {
-		try {
-			JsonWebEncryption jsonWebEncryption = new JsonWebEncryption();
-			jsonWebEncryption.setAlgorithmHeaderValue(KeyManagementAlgorithmIdentifiers.RSA_OAEP_256);
-			jsonWebEncryption.setEncryptionMethodHeaderParameter(ContentEncryptionAlgorithmIdentifiers.AES_256_GCM);
-			jsonWebEncryption.setPayload(walletBindingId);
-			jsonWebEncryption.setContentTypeHeaderValue("JWT");
-			RsaJsonWebKey jsonWebKey = new RsaJsonWebKey(publicKey);
-			jsonWebEncryption.setKey(jsonWebKey.getKey());
-			jsonWebEncryption.setKeyIdHeaderValue(jsonWebKey.getKeyId());
-			return jsonWebEncryption.getCompactSerialization();
-		} catch (JoseException e) {
-			log.error("Failed to create JWE", e);
-			throw new EsignetException(FAILED_TO_CREATE_JWE);
-		}
-	}
+        if (!challengeList.stream().allMatch(challenge ->
+                keyBindingWrapper
+                        .getSupportedChallengeFormats(challenge.getAuthFactorType())
+                        .contains(challenge.getFormat()))) {
+
+            log.error("Invalid auth factor type or challenge format in the challenge list");
+            throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
+        }
+    }
+
+    @Override
+    public WalletBindingResponse bindWallet(
+            WalletBindingRequest walletBindingRequest,
+            Map<String, String> requestHeaders) throws EsignetException {
+
+        log.debug("bindWallet :: Request headers >> {}", requestHeaders);
+
+        validateChallengeListAuthFormat(walletBindingRequest.getChallengeList());
+
+        if (!keyBindingWrapper
+                .getSupportedChallengeFormats(walletBindingRequest.getAuthFactorType())
+                .contains(walletBindingRequest.getFormat())) {
+            throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
+        }
+
+        Map<String, Object> publicKey = walletBindingRequest.getPublicKey();
+
+        KeyBindingResult keyBindingResult;
+        try {
+            keyBindingResult = keyBindingWrapper.doKeyBinding(
+                    walletBindingRequest.getIndividualId(),
+                    walletBindingRequest.getChallengeList(),
+                    publicKey,
+                    walletBindingRequest.getAuthFactorType(),
+                    requestHeaders);
+        } catch (KeyBindingException e) {
+            log.error("Failed to bind the key", e);
+            throw new EsignetException(e.getErrorCode());
+        }
+
+        if (keyBindingResult == null
+                || keyBindingResult.getCertificate() == null
+                || keyBindingResult.getPartnerSpecificUserToken() == null) {
+
+            log.error("wallet binding failed with result : {}", keyBindingResult);
+            throw new EsignetException(KEY_BINDING_FAILED);
+        }
+
+        PublicKeyRegistry publicKeyRegistry =
+                keyBindingHelperService.storeKeyBindingDetailsInRegistry(
+                        walletBindingRequest.getIndividualId(),
+                        keyBindingResult.getPartnerSpecificUserToken(),
+                        publicKey,
+                        keyBindingResult.getCertificate(),
+                        walletBindingRequest.getAuthFactorType());
+
+        return new WalletBindingResponse(
+                encryptBindingId
+                        ? getJWE(publicKey, publicKeyRegistry.getWalletBindingId())
+                        : publicKeyRegistry.getWalletBindingId(),
+                keyBindingResult.getCertificate(),
+                publicKeyRegistry.getExpiredtimes().format(
+                        DateTimeFormatter.ofPattern(UTC_DATETIME_PATTERN)));
+    }
+
+    private String getJWE(
+            Map<String, Object> publicKey,
+            String walletBindingId) {
+
+        try {
+            JsonWebEncryption jsonWebEncryption = new JsonWebEncryption();
+            jsonWebEncryption.setAlgorithmHeaderValue(
+                    KeyManagementAlgorithmIdentifiers.RSA_OAEP_256);
+            jsonWebEncryption.setEncryptionMethodHeaderParameter(
+                    ContentEncryptionAlgorithmIdentifiers.AES_256_GCM);
+            jsonWebEncryption.setPayload(walletBindingId);
+            jsonWebEncryption.setContentTypeHeaderValue("JWT");
+
+            RsaJsonWebKey jsonWebKey = new RsaJsonWebKey(publicKey);
+            jsonWebEncryption.setKey(jsonWebKey.getKey());
+            jsonWebEncryption.setKeyIdHeaderValue(jsonWebKey.getKeyId());
+
+            return jsonWebEncryption.getCompactSerialization();
+
+        } catch (JoseException e) {
+            log.error("Failed to create JWE", e);
+            throw new EsignetException(FAILED_TO_CREATE_JWE);
+        }
+    }
 }
