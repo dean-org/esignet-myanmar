@@ -7,7 +7,7 @@ package io.mosip.esignet.core.dto;
 
 
 import java.util.List;
-import java.util.Map;
+
 
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
@@ -35,8 +35,7 @@ public class WalletBindingRequest {
 	private List<@Valid AuthChallenge> challengeList;
     
     @NotEmpty(message = ErrorConstants.INVALID_PUBLIC_KEY)
-    private String publicKey;
-	//private Map<String, Object> publicKey;
+    private Map<String, Object> publicKey;
 
 	@NotEmpty(message = ErrorConstants.INVALID_AUTH_FACTOR_TYPE)
 	private String authFactorType; //bind a key to a single auth-factor-type
