@@ -90,44 +90,58 @@ public class KeyBindingServiceImpl implements KeyBindingService {
 	}
 
 	@Override
-	public WalletBindingResponse bindWallet(WalletBindingRequest walletBindingRequest, Map<String, String> requestHeaders) throws EsignetException {
-		log.debug("bindWallet :: Request headers >> {}", requestHeaders);
-		validateChallengeListAuthFormat(walletBindingRequest.getChallengeList());
-
-		//Do not store format, only check if the format is supported by the wrapper.
-		if(!keyBindingWrapper.getSupportedChallengeFormats(walletBindingRequest.getAuthFactorType()).
-				contains(walletBindingRequest.getFormat()))
-			throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
-
-		String publicKey = IdentityProviderUtil.getJWKString(walletBindingRequest.getPublicKey());
-		KeyBindingResult keyBindingResult;
-		try {
-			keyBindingResult = keyBindingWrapper.doKeyBinding(
-			    walletBindingRequest.getIndividualId(),
-			    walletBindingRequest.getChallengeList(),
-			    walletBindingRequest.getPublicKey(),
-			    walletBindingRequest.getAuthFactorType(),
-			    requestHeaders
-			);
-		} catch (KeyBindingException e) {
-			log.error("Failed to bind the key", e);
-			throw new EsignetException(e.getErrorCode());
-		}
-
-		if (keyBindingResult == null || keyBindingResult.getCertificate() == null || keyBindingResult.getPartnerSpecificUserToken() == null) {
-			log.error("wallet binding failed with result : {}", keyBindingResult);
-			throw new EsignetException(KEY_BINDING_FAILED);
-		}
-
-		//We will always keep this in binding-service control, as future features will be based on this registry.
-		PublicKeyRegistry publicKeyRegistry = keyBindingHelperService.storeKeyBindingDetailsInRegistry(walletBindingRequest.getIndividualId(),
-				keyBindingResult.getPartnerSpecificUserToken(), publicKey, keyBindingResult.getCertificate(),
-				walletBindingRequest.getAuthFactorType());
-
-		return new WalletBindingResponse(encryptBindingId ? getJWE(walletBindingRequest.getPublicKey(), publicKeyRegistry.getWalletBindingId()) :
-						publicKeyRegistry.getWalletBindingId(),
-				keyBindingResult.getCertificate(),
-				publicKeyRegistry.getExpiredtimes().format(DateTimeFormatter.ofPattern(UTC_DATETIME_PATTERN)));
+	public WalletBindingResponse bindWallet(
+	        WalletBindingRequest walletBindingRequest,
+	        Map<String, String> requestHeaders) throws EsignetException {
+	
+	    log.debug("bindWallet :: Request headers >> {}", requestHeaders);
+	    validateChallengeListAuthFormat(walletBindingRequest.getChallengeList());
+	
+	    if (!keyBindingWrapper.getSupportedChallengeFormats(
+	            walletBindingRequest.getAuthFactorType())
+	            .contains(walletBindingRequest.getFormat())) {
+	        throw new EsignetException(INVALID_AUTH_FACTOR_TYPE_OR_CHALLENGE_FORMAT);
+	    }
+	
+	    String publicKey = IdentityProviderUtil.getJWKString(
+	            walletBindingRequest.getPublicKey());
+	
+	    KeyBindingResult keyBindingResult;
+	    try {
+	        keyBindingResult = keyBindingWrapper.doKeyBinding(
+	                walletBindingRequest.getIndividualId(),
+	                walletBindingRequest.getChallengeList(),
+	                walletBindingRequest.getPublicKey(),
+	                walletBindingRequest.getAuthFactorType(),
+	                requestHeaders);
+	    } catch (KeyBindingException e) {
+	        log.error("Failed to bind the key", e);
+	        throw new EsignetException(e.getErrorCode());
+	    }
+	
+	    if (keyBindingResult == null
+	            || keyBindingResult.getCertificate() == null
+	            || keyBindingResult.getPartnerSpecificUserToken() == null) {
+	        log.error("wallet binding failed with result : {}", keyBindingResult);
+	        throw new EsignetException(KEY_BINDING_FAILED);
+	    }
+	
+	    PublicKeyRegistry publicKeyRegistry =
+	            keyBindingHelperService.storeKeyBindingDetailsInRegistry(
+	                    walletBindingRequest.getIndividualId(),
+	                    keyBindingResult.getPartnerSpecificUserToken(),
+	                    publicKey,
+	                    keyBindingResult.getCertificate(),
+	                    walletBindingRequest.getAuthFactorType());
+	
+	    return new WalletBindingResponse(
+	            encryptBindingId
+	                    ? getJWE(walletBindingRequest.getPublicKey(),
+	                            publicKeyRegistry.getWalletBindingId())
+	                    : publicKeyRegistry.getWalletBindingId(),
+	            keyBindingResult.getCertificate(),
+	            publicKeyRegistry.getExpiredtimes().format(
+	                    DateTimeFormatter.ofPattern(UTC_DATETIME_PATTERN)));
 	}
 
 	private String getJWE(Map<String, Object> publicKey, String walletBindingId) {
