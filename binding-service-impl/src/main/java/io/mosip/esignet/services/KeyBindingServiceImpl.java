@@ -102,9 +102,13 @@ public class KeyBindingServiceImpl implements KeyBindingService {
 		String publicKey = IdentityProviderUtil.getJWKString(walletBindingRequest.getPublicKey());
 		KeyBindingResult keyBindingResult;
 		try {
-			keyBindingResult = keyBindingWrapper.doKeyBinding(walletBindingRequest.getIndividualId(),
-        walletBindingRequest.getChallengeList(), publicKey,
-        walletBindingRequest.getAuthFactorType(), requestHeaders);
+			keyBindingResult = keyBindingWrapper.doKeyBinding(
+			    walletBindingRequest.getIndividualId(),
+			    walletBindingRequest.getChallengeList(),
+			    walletBindingRequest.getPublicKey(),
+			    walletBindingRequest.getAuthFactorType(),
+			    requestHeaders
+			);
 		} catch (KeyBindingException e) {
 			log.error("Failed to bind the key", e);
 			throw new EsignetException(e.getErrorCode());
