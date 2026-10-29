@@ -13,9 +13,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import io.mosip.esignet.api.dto.AuthChallenge;
 import io.mosip.esignet.api.dto.KeyBindingResult;
 import io.mosip.esignet.api.dto.SendOtpResult;
@@ -25,9 +22,9 @@ import io.mosip.esignet.api.spi.KeyBinder;
 import io.mosip.esignet.core.dto.*;
 import io.mosip.esignet.core.exception.EsignetException;
 import io.mosip.esignet.core.spi.KeyBindingService;
-import io.mosip.esignet.core.util.IdentityProviderUtil;
 import io.mosip.esignet.entity.PublicKeyRegistry;
 import io.mosip.esignet.repository.PublicKeyRegistryRepository;
+import io.mosip.esignet.services.KeyBindingHelperService;
 import io.mosip.kernel.keymanagerservice.util.KeymanagerUtil;
 
 import org.jose4j.jwe.ContentEncryptionAlgorithmIdentifiers;
@@ -41,6 +38,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import io.mosip.esignet.core.util.IdentityProviderUtil;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -59,9 +57,6 @@ public class KeyBindingServiceImpl implements KeyBindingService {
 
     @Autowired
     private KeyBindingHelperService keyBindingHelperService;
-
-    @Autowired
-    private ObjectMapper objectMapper;
 
     @Value("${mosip.esignet.binding.encrypt-binding-id:true}")
     private boolean encryptBindingId;
@@ -114,6 +109,7 @@ public class KeyBindingServiceImpl implements KeyBindingService {
             Map<String, String> requestHeaders) throws EsignetException {
 
         log.debug("bindWallet :: Request headers >> {}", requestHeaders);
+
         validateChallengeListAuthFormat(walletBindingRequest.getChallengeList());
 
         if (!keyBindingWrapper
@@ -144,19 +140,11 @@ public class KeyBindingServiceImpl implements KeyBindingService {
             throw new EsignetException(KEY_BINDING_FAILED);
         }
 
-        String publicKeyJson;
-        try {
-            publicKeyJson = objectMapper.writeValueAsString(publicKey);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize public key", e);
-            throw new EsignetException(KEY_BINDING_FAILED);
-        }
-
         PublicKeyRegistry publicKeyRegistry =
                 keyBindingHelperService.storeKeyBindingDetailsInRegistry(
                         walletBindingRequest.getIndividualId(),
                         keyBindingResult.getPartnerSpecificUserToken(),
-                        publicKeyJson,
+                        publicKey,
                         keyBindingResult.getCertificate(),
                         walletBindingRequest.getAuthFactorType());
 
